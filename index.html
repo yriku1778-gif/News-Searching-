@@ -19,10 +19,10 @@
     <script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@^19.2.3",
-    "react-dom": "https://esm.sh/react-dom@^19.2.3",
-    "react-dom/client": "https://esm.sh/react-dom@^19.2.3/client",
-    "@google/genai": "https://esm.sh/@google/genai@^1.35.0",
+    "react": "https://esm.sh/react@19.0.0",
+    "react-dom": "https://esm.sh/react-dom@19.0.0",
+    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+    "@google/genai": "https://esm.sh/@google/genai@1.3.0",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "react/": "https://esm.sh/react@^19.2.3/"
   }
@@ -37,7 +37,6 @@
         import ReactDOM from 'react-dom/client';
         import { GoogleGenAI, Type } from '@google/genai';
 
-        // --- 配置與數據 ---
         const INITIAL_SOURCES = [
             { id: '1', name: '工商時報', domain: 'ctee.com.tw', selected: true },
             { id: '2', name: '經濟日報', domain: 'money.udn.com', selected: true },
@@ -52,22 +51,12 @@
             { id: '9', name: 'Bloomberg', domain: 'bloomberg.com', selected: false }
         ];
 
-        const ARTICLES_PER_PAGE = 6;
-        const getTodayStr = () => new Date().toISOString().split('T')[0];
-        const getLastMonthStr = () => {
-            const d = new Date();
-            d.setMonth(d.getMonth() - 1);
-            return d.toISOString().split('T')[0];
-        };
-
-        // --- 組件: 新聞卡片 ---
         const ArticleCard = ({ article }) => {
             const sentimentColors = {
                 positive: 'bg-green-100 text-green-700',
                 neutral: 'bg-gray-100 text-gray-700',
                 negative: 'bg-red-100 text-red-700',
             };
-
             return (
                 <div onClick={() => window.open(article.url, '_blank')} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 flex flex-col h-full group cursor-pointer relative">
                     <div className="p-5 flex-grow">
@@ -91,35 +80,29 @@
             );
         };
 
-        // --- 主應用程式 ---
         const App = () => {
             const [keywords, setKeywords] = useState('');
-            const [startDate, setStartDate] = useState(getLastMonthStr());
-            const [endDate, setEndDate] = useState(getTodayStr());
+            const [startDate, setStartDate] = useState(() => {
+                const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().split('T')[0];
+            });
+            const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
             const [loading, setLoading] = useState(false);
             const [articles, setArticles] = useState([]);
             const [trendAnalysis, setTrendAnalysis] = useState('');
             const [error, setError] = useState(null);
             const [sources, setSources] = useState(INITIAL_SOURCES);
             const [showAccountInfo, setShowAccountInfo] = useState(true);
-            const [hasSearched, setHasSearched] = useState(false);
-            const [currentPage, setCurrentPage] = useState(1);
 
             const handleSearch = async (e) => {
-                if (e) e.preventDefault();
+                e.preventDefault();
                 if (!keywords.trim()) return;
-
                 setLoading(true);
-                setHasSearched(true);
-                setCurrentPage(1);
                 setError(null);
 
                 try {
-                    // 初始化 SDK (apiKey 會由 GitHub 環境或 process.env 提供，本地測試時可手動填入)
-                    const ai = new GoogleGenAI({ apiKey: "YOUR_API_KEY" }); 
-                    
+                    const ai = new GoogleGenAI({ apiKey: "YOUR_API_KEY" }); // 注意：GitHub Pages 需要手動輸入或替換此 Key
                     const selectedDomains = sources.filter(s => s.selected).map(s => s.domain).join(", ");
-                    const prompt = `Task: Find news articles about "${keywords}" from ${startDate} to ${endDate}. Focus on ${selectedDomains}. Language: Traditional Chinese.`;
+                    const prompt = `Find news about "${keywords}" from ${startDate} to ${endDate} on ${selectedDomains}. Return JSON format. Language: Traditional Chinese.`;
 
                     const response = await ai.models.generateContent({
                         model: "gemini-3-flash-preview",
@@ -141,55 +124,38 @@
                                                 category: { type: Type.STRING },
                                                 sentiment: { type: Type.STRING },
                                                 publishedDate: { type: Type.STRING }
-                                            },
-                                            required: ["title", "summary", "source", "category", "sentiment", "publishedDate"]
+                                            }
                                         }
                                     },
                                     overallTrend: { type: Type.STRING }
-                                },
-                                required: ["articles", "overallTrend"]
+                                }
                             }
                         }
                     });
 
-                    const result = JSON.parse(response.text || "{}");
+                    const result = JSON.parse(response.text);
                     const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
                     
-                    const processedArticles = (result.articles || []).map((art, idx) => ({
+                    setArticles(result.articles.map((art, idx) => ({
                         ...art,
-                        id: Math.random().toString(36).substr(2, 9),
-                        url: groundingChunks[idx]?.web?.uri || `https://www.google.com/search?q=${encodeURIComponent(art.source + " " + art.title)}`
-                    }));
-
-                    setArticles(processedArticles);
-                    setTrendAnalysis(result.overallTrend || "");
+                        id: Math.random(),
+                        url: groundingChunks[idx]?.web?.uri || `https://www.google.com/search?q=${encodeURIComponent(art.title)}`
+                    })));
+                    setTrendAnalysis(result.overallTrend);
                 } catch (err) {
-                    console.error(err);
-                    setError("搜尋失敗，請確保 API Key 已正確設置。");
+                    setError("API 請求失敗，請檢查金鑰。");
                 } finally {
                     setLoading(false);
                 }
             };
 
-            const toggleSource = (id) => {
-                setSources(prev => prev.map(s => s.id === id ? { ...s, selected: !s.selected } : s));
-            };
-
-            const displayedArticles = useMemo(() => {
-                const startIndex = (currentPage - 1) * ARTICLES_PER_PAGE;
-                return articles.slice(startIndex, startIndex + ARTICLES_PER_PAGE);
-            }, [articles, currentPage]);
-
-            const totalPages = Math.ceil(articles.length / ARTICLES_PER_PAGE);
-
             return (
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-                    {/* 資訊卡片 */}
+                <div className="max-w-7xl mx-auto px-4 py-10">
                     <div className={`fixed top-6 right-6 z-50 transition-all ${showAccountInfo ? 'scale-100 opacity-100' : 'scale-0 opacity-0 pointer-events-none'}`}>
                         <div className="bg-white/90 backdrop-blur-md border border-slate-200 shadow-2xl rounded-2xl p-4 w-72">
-                            <div className="flex justify-between items-center mb-3 border-b pb-2">
-                                <h3 className="text-sm font-black text-slate-800 tracking-tight">🔑 內部帳號資訊</h3>
-                                <button onClick={() => setShowAccountInfo(false)} className="text-slate-400">✕</button>
+                            <div className="flex justify-between items-center mb-3 border-b pb-2 text-xs font-bold">
+                                <span>🔑 帳號資訊</span>
+                                <button onClick={() => setShowAccountInfo(false)}>✕</button>
                             </div>
                             <div className="space-y-2 text-[10px] text-slate-600">
                                 <div><p className="font-bold text-blue-600">SNN 鋼鐵網</p>cindy.tsai@sumitomocorp.com / kaozz1234</div>
@@ -200,82 +166,48 @@
                     </div>
 
                     <header className="mb-12 text-center">
-                        <h1 className="text-5xl font-black text-slate-900 mb-4">News <span className="text-blue-600">Intelligence</span></h1>
-                        <p className="text-slate-500 font-medium">基於 Gemini 3 Flash 的即時產業洞察系統</p>
+                        <h1 className="text-4xl font-black text-slate-900 mb-2">News <span className="text-blue-600">Intelligence</span></h1>
+                        <p className="text-slate-500">產業新聞智能抓取智庫 (GitHub Pages 專用版)</p>
                     </header>
 
-                    <div className="max-w-3xl mx-auto mb-16 space-y-6">
-                        <form onSubmit={handleSearch} className="space-y-4">
-                            <div className="relative flex items-center">
-                                <input
-                                    type="text"
-                                    className="w-full pl-6 pr-32 py-4 rounded-2xl border border-slate-200 bg-white shadow-sm focus:ring-4 focus:ring-blue-100 outline-none transition-all text-lg"
-                                    placeholder="輸入關鍵字..."
-                                    value={keywords}
-                                    onChange={(e) => setKeywords(e.target.value)}
-                                />
-                                <button type="submit" disabled={loading} className="absolute right-2 px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">
-                                    {loading ? '搜尋中' : '即時抓取'}
-                                </button>
-                            </div>
-                            <div className="bg-white p-4 rounded-xl border border-slate-200 flex items-center gap-4">
-                                <span className="text-xs font-black text-slate-400 uppercase tracking-widest">時間範圍</span>
-                                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="bg-slate-50 border rounded-lg px-2 py-1 text-sm flex-1" />
-                                <span className="text-slate-400">至</span>
-                                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="bg-slate-50 border rounded-lg px-2 py-1 text-sm flex-1" />
-                            </div>
+                    <div className="max-w-2xl mx-auto mb-10 space-y-4">
+                        <form onSubmit={handleSearch} className="flex gap-2">
+                            <input 
+                                className="flex-1 px-4 py-3 rounded-xl border border-slate-200 shadow-sm outline-none focus:ring-2 focus:ring-blue-400" 
+                                placeholder="輸入關鍵字..." 
+                                value={keywords} 
+                                onChange={e => setKeywords(e.target.value)}
+                            />
+                            <button type="submit" className="px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors">
+                                {loading ? '抓取中...' : '即時抓取'}
+                            </button>
                         </form>
-
-                        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                            <h4 className="text-xs font-black text-slate-400 uppercase mb-4 tracking-widest">媒體來源</h4>
-                            <div className="flex flex-wrap gap-2">
-                                {sources.map(s => (
-                                    <button
-                                        key={s.id}
-                                        onClick={() => toggleSource(s.id)}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${s.selected ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-blue-400'}`}
-                                    >
-                                        {s.name}
-                                    </button>
-                                ))}
-                            </div>
+                        <div className="flex gap-2 items-center text-sm font-medium text-slate-500 bg-white p-3 rounded-xl border">
+                            <span>區間：</span>
+                            <input type="date" className="border-none bg-transparent" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                            <span>-</span>
+                            <input type="date" className="border-none bg-transparent" value={endDate} onChange={e => setEndDate(e.target.value)} />
                         </div>
                     </div>
+
+                    {error && <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 text-center">{error}</div>}
 
                     {trendAnalysis && (
-                        <div className="bg-blue-50/50 border border-blue-100 rounded-2xl p-6 mb-12 animate-in">
-                            <h2 className="text-xl font-bold text-blue-900 mb-3 flex items-center gap-2">📊 趨勢分析</h2>
-                            <p className="text-blue-800 leading-relaxed font-medium">{trendAnalysis}</p>
+                        <div className="bg-blue-50 border border-blue-100 p-6 rounded-2xl mb-10 animate-in">
+                            <h2 className="font-bold text-blue-800 mb-2">📊 趨勢分析</h2>
+                            <p className="text-blue-900">{trendAnalysis}</p>
                         </div>
                     )}
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
-                        {loading ? (
-                            [1,2,3].map(i => <div key={i} className="bg-white border rounded-xl h-64 animate-pulse"></div>)
-                        ) : (
-                            displayedArticles.map(art => <ArticleCard key={art.id} article={art} />)
-                        )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {loading ? <p className="col-span-full text-center py-10 text-slate-400">正在透過 Gemini 深度檢索網路新聞...</p> : 
+                            articles.map(art => <ArticleCard key={art.id} article={art} />)}
                     </div>
-
-                    {totalPages > 1 && (
-                        <div className="flex justify-center gap-2 pb-12">
-                            {[...Array(totalPages)].map((_, i) => (
-                                <button
-                                    key={i}
-                                    onClick={() => { setCurrentPage(i+1); window.scrollTo({top: 400, behavior: 'smooth'}); }}
-                                    className={`w-10 h-10 rounded-lg font-bold text-sm ${currentPage === i+1 ? 'bg-blue-600 text-white shadow-lg' : 'bg-white border text-slate-500'}`}
-                                >
-                                    {i+1}
-                                </button>
-                            ))}
-                        </div>
-                    )}
                 </div>
             );
         };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
     </script>
 </body>
 </html>
